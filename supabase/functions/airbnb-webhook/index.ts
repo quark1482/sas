@@ -1,3 +1,21 @@
+/*
+ * Part of the SupAir scraper project.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
 import { serve }        from 'std/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -15,45 +33,49 @@ serve(async function(req) {
     const id = jsn.record.id;
     console.log(`type: ${type}, table: ${table}, id: ${id}`);
     try {
+        // Connects to the database with the project's 'service role' API KEY, ...
+        // ... which bypases Row Level Security, but it's safe to use here since ...
+        // ... this is an edge funcion, running from Supabase directly.
         const supabase = createClient(
             Deno.env.get('SUPABASE_URL'),
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
         );
-        const { data, error } = await supabase.from('rooms').select('*');
-        if (error) {
-            console.log(`** ${error.message}`);
-            throw error;
-        } else {
-            console.log(`id: ${id}`);
-            const ret = await getListingDetails(id);
-            if (ret.status) {
-                const u = {
-                    status: ret.message,
-                    name: ret.name,
-                    description: ret.description,
-                    type: ret.type,
-                    details: ret.details,
-                    host: ret.host,
-                    price: ret.price,
-                    rating: ret.rating,
-                    amenities: ret.amenities,
-                    photos: ret.photos,
-                    location: ret.location
-                };
-                const { error } = await supabase.from('rooms').update(u).eq('id', id);
-                if (error) {
-                    console.log(`** ${error.message}`);
-                    throw new Error(error.message);
-                }
-            } else {
-                const u = { status: ret.message };
-                const { error } = await supabase.from('rooms').update(u).eq('id', id);
-                console.log(`** ${ret.message}`);
-                throw new Error(ret.message);
+        console.log(`id: ${id}`);
+        // Scrapes the details of the listing whose id belongs to the inserted record.
+        // This clearly requires an existing webhook for the event 'Insert' which ...
+        // ... passes the required record id, but it may be extended for 'Update' ...
+        // ... allowing a follow-up scrape of the same listing in a future.
+        const ret = await getListingDetails(id);
+        if (ret.status) {
+            const u = {
+                status: ret.message,
+                name: ret.name,
+                description: ret.description,
+                type: ret.type,
+                details: ret.details,
+                host: ret.host,
+                price: ret.price,
+                rating: ret.rating,
+                amenities: ret.amenities,
+                photos: ret.photos,
+                location: ret.location
+            };
+            // Updates the table with the scraped data.
+            const { error } = await supabase.from('rooms').update(u).eq('id', id);
+            if (error) {
+                console.log(`** ${error.message}`);
+                throw new Error(error.message);
             }
+        } else {
+            const u = { status: ret.message };
+            // Updates the table with the scraping status message if something went wrong.
+            const { error } = await supabase.from('rooms').update(u).eq('id', id);
+            console.log(`** ${ret.message}`);
+            throw new Error(ret.message);
         }
+        // Returns the whole scraping result to the caller, if it was successful.
         return new Response(
-            JSON.stringify({ data }),
+            JSON.stringify({ data: ret }),
             { headers: { 'Content-Type': 'application/json' }, status: 200 }
         );
     } catch (error) {
@@ -64,6 +86,23 @@ serve(async function(req) {
     }
 });
 
+/**
+ * @brief Scraps the listing details from airbnb.com for a given id.
+ *
+ * @note The API V3 of airbnb.com requires that all the requests are sent
+ *       using HTTP/2 connections.
+ *       For Node.js, an implementation such as 'fetch-h2' may come handy.
+ *
+ * @note See https://stackoverflow.com/questions/72263805 for a method to get
+ *       the persistedQuery.sha256Hash value for the extensions parameter in
+ *       the API V3 calls.
+ *
+ * @param {string} id  airbnb.com's listing id.
+ *
+ * @return {Object}  results.
+ * @return {boolean} results.status       true if operation was successful.
+ * @return {string}  results.message      error text if operation failed.
+ */
 async function getListingDetails(id) {
     const ret = {
         status: false,
@@ -87,6 +126,7 @@ async function getListingDetails(id) {
     };
     const url = `${abURL}/rooms/${id}`;
     const ua = new UserAgent();
+    // Forges all the requests with a made-up User Agent.
     const config = { headers: { 'User-Agent': ua.toString() } };
     try {
         const res = await fetch(url, config);
@@ -95,6 +135,7 @@ async function getListingDetails(id) {
         } else if (-1 == res.headers.get('content-type').indexOf('text/html')) {
             throw new Error(`Unexpected content type: ${res.headers.get('content-type')}`);
         }
+        // Loads the listing HTML and finds for the PdpPlatformRoute script URL.
         const page = cheerio.load(await res.text());
         const scripts = page('script');
         let script = '';
@@ -115,6 +156,7 @@ async function getListingDetails(id) {
             } else if (-1 == res.headers.get('content-type').indexOf('application/javascript')) {
                 throw new Error(`Unexpected content type: ${res.headers.get('content-type')}`);
             }
+            // Loads the PdpPlatformRoute script source code and finds for the sha256Hash value.
             opId = (await res.text()).match(/name:'StaysPdpSections',type:'query',operationId:'([0-9a-f]+)'/)?.[1];
         } else {
             throw new Error('Unable to find the PdpPlatformRoute script');
@@ -149,6 +191,7 @@ async function getListingDetails(id) {
             const encOpVars = encodeURIComponent(JSON.stringify(opVars));
             const encOpExts = encodeURIComponent(JSON.stringify(opExts));
             const query = `operationName=StaysPdpSections&locale=en&currency=USD&variables=${encOpVars}&extensions=${encOpExts}`;
+            // Makes the API V3 request URL for getting the required property details.
             opAPIReqURL = `${abURL}/api/v3/StaysPdpSections?${query}`;
         } else {
             throw new Error('Unable to find the operationId value');
@@ -164,6 +207,8 @@ async function getListingDetails(id) {
             }
             const json = await res.json();
             const staySections = json.data.presentation.stayProductDetailPage.sections;
+            // Checks for the different locations in the API JSON response ...
+            // ... where an error condition may be returned.
             if (json.errors) {
                 throw new Error(json.errors[0].message);
             } else if (staySections.metadata.errorData) {
@@ -171,6 +216,7 @@ async function getListingDetails(id) {
             }
             const sections = staySections.sections;
             console.log(JSON.stringify(json));
+            // Fills up the 'result' object with the required values found in the JSON response 'sections'.
             for (const k in sections) {
                 if ('TITLE_DEFAULT' === sections[k].sectionId) {
                     if ('PdpTitleSection' === sections[k].section.__typename) {
@@ -178,6 +224,7 @@ async function getListingDetails(id) {
                     }
                 } else if ('DESCRIPTION_DEFAULT' === sections[k].sectionId) {
                     if ('PdpDescriptionSection' === sections[k].section.__typename) {
+                        // Strips the unwanted HTML tags from the listing description.
                         ret.description = sanitizeHtml(
                             sections[k].section.htmlDescription.htmlText,
                             {
@@ -235,6 +282,7 @@ async function getListingDetails(id) {
                     }
                 }
             }
+            // Verifies that the 'result' object meets the minimum required set of fields.
             if (ret.name.length && ret.price.value.length) {
                 ret.status = true;
             } else {

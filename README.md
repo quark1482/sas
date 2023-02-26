@@ -77,7 +77,62 @@ Installation
     - Wait a few seconds and click on Refresh
     - Check the collected data for the new record.
     <br>_The "status" value will be EMPTY unless something fails_<br><br>
-    ><sup>"room id" is the numerical value following ` https://www.airbnb.com/rooms/ `</sup>
+    ><sup>"room id" is the numerical value following ` https://www.airbnb.com/rooms/ ` for each listing</sup>
+
+
+Results
+-------
+
+According to the installation process, an Edge Function is created and then set up to be
+<br>invoked by a Webhook, every time a new record is created in our specifically designed table.
+
+As explained before, the only requirement in the "insert form" is filling up the field "id",
+<br>since the others will be automatically scraped from airbnb.
+
+The easiest way of understanding what's being scraped, is by looking at the table structure:
+
+```
+create table rooms (
+  id          text       default ''::text                               primary key,
+  status      text       default ''::text                               not null,
+  name        text       default ''::text                               not null,
+  description text       default ''::text                               not null,
+  type        text       default ''::text                               not null,
+  details     text array default '{}'::text[]                           not null,
+  host        text       default ''::text                               not null,
+  price       jsonb      default '{"value": 0, "qualifier": ""}'::jsonb not null,
+  rating      real       default '0'::real                              not null,
+  amenities   text array default '{}'::text[]                           not null,
+  photos      text array default '{}'::text[]                           not null,
+  location    jsonb      default '{"lat": 0, "lng": 0}'::jsonb          not null
+);
+```
+
+><sup>"id" is the airbnb.com room id</sup>
+
+><sup>"status" is where you can quickly verify the scraping result (EMPTY means success)</sup>
+
+><sup>"name" is the room listing title</sup>
+
+><sup>"description", the listing description paragraph(s) which may contain some HTML tags </sup>
+
+><sup>"type", the room type - something like "entire place", "private room", etc. </sup>
+
+><sup>"details", an array of specifics - amount of beds, amount of baths, etc. </sup>
+
+><sup>"host", the name/nickname of the property's host</sup>
+
+><sup>"price", a pair of values - the price itself (in USD) and what's covered by that (a "night", mostly) </sup>
+
+><sup>"rating", the overall property/host rating</sup>
+
+><sup>"amenities", an array of room features, like "hot water", "wifi", "kitchen", etc. </sup>
+
+><sup>"photos", all the listing photos (an array of links)</sup>
+
+><sup>"location", the pair of coordinates (latitude/longitude) of the property's location</sup>
+
+_The bare minimum of fields collected for a scraping to be considered successful is Name and Price._
 
 
 Dependencies
