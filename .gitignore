@@ -1,0 +1,7 @@
+# Temp files
+supabase/.temp
+
+# Additional configuration files
+*.ini
+
+# Anything else
