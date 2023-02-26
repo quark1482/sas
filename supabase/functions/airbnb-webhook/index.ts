@@ -27,20 +27,19 @@ const abURL    = 'https://www.airbnb.com';
 const abAPIKey = 'd306zoyjsyarp7ifhu67rjxn52tv0t20';
 
 serve(async function(req) {
-    const jsn = await req.json();
-    const type = jsn.type;
-    const table = jsn.table;
-    const id = jsn.record.id;
+    const json = await req.json();
+    const type = json.type;
+    const table = json.table;
+    const id = json.record.id;
     console.log(`type: ${type}, table: ${table}, id: ${id}`);
     try {
         // Connects to the database with the project's 'service role' API KEY, ...
         // ... which bypases Row Level Security, but it's safe to use here since ...
-        // ... this is an edge funcion, running from Supabase directly.
+        // ... this is an edge function, running from Supabase directly.
         const supabase = createClient(
             Deno.env.get('SUPABASE_URL'),
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
         );
-        console.log(`id: ${id}`);
         // Scrapes the details of the listing whose id belongs to the inserted record.
         // This clearly requires an existing webhook for the event 'Insert' which ...
         // ... passes the required record id, but it may be extended for 'Update' ...
@@ -73,6 +72,7 @@ serve(async function(req) {
             console.log(`** ${ret.message}`);
             throw new Error(ret.message);
         }
+        console.log(ret);
         // Returns the whole scraping result to the caller, if it was successful.
         return new Response(
             JSON.stringify({ data: ret }),
@@ -197,7 +197,6 @@ async function getListingDetails(id) {
             throw new Error('Unable to find the operationId value');
         }
         if (opAPIReqURL.length) {
-            console.log(opAPIReqURL);
             config.headers['X-Airbnb-Api-Key'] = abAPIKey;
             const res = await fetch(opAPIReqURL, config);
             if (200 != res.status) {
@@ -215,7 +214,6 @@ async function getListingDetails(id) {
                 throw new Error(staySections.metadata.errorData.errorMessage.errorMessage);
             }
             const sections = staySections.sections;
-            console.log(JSON.stringify(json));
             // Fills up the 'result' object with the required values found in the JSON response 'sections'.
             for (const k in sections) {
                 if ('TITLE_DEFAULT' === sections[k].sectionId) {
