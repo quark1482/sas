@@ -10,10 +10,12 @@ Features
 * Shows the scraping status/result in a special column.
 
 
-Known bugs
-----------
+Known bugs / ToDo's
+-------------------
 
-* For some random listings, the script only gets 50x errors. Still figuring out why.
+- [ ] For some random listings, the script only gets 50x errors. ~~Still figuring out why~~.
+<br>*It seems that under some circumnstances the 'BOOK_IT_' sections cannot be combined
+<br>with the others in a single query*.
 
 
 Installation

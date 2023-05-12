@@ -19,7 +19,6 @@
 import { serve }        from 'std/server';
 import { createClient } from '@supabase/supabase-js';
 
-//import cheerio         from 'cheerio'; // Disabled in this release. Using htmlparser2 instead.
 import * as htmlparser2 from "htmlparser2";
 import sanitizeHtml     from 'sanitize-html';
 import UserAgent        from 'user-agents';
@@ -88,6 +87,52 @@ serve(async function(req) {
 });
 
 /**
+ * @brief Loads the listing HTML and finds for the PdpPlatformRoute script URL.
+ *
+ * @param {string} url     airbnb.com's listing URL.
+ * @param {Object} config  options for the listing request.
+ *
+ * @return {Object}  results.
+ * @return {boolean} results.status   true if operation was successful.
+ * @return {string}  results.message  error text if operation failed.
+ * @return {string}  results.script   URL of the PdpPlatformRoute script.
+ */
+async function findPlatformRouteScript(url, config) {
+    const ret = {
+        status: false,
+        message: '',
+        script: ''
+    };
+    try {
+        const res = await fetch(url, config);
+        if (200 != res.status) {
+            throw new Error(`Unexpected response code: ${res.status}`);
+        } else if (-1 == res.headers.get('content-type').indexOf('text/html')) {
+            throw new Error(`Unexpected content type: ${res.headers.get('content-type')}`);
+        }
+        const parser = new htmlparser2.Parser({
+            onopentag(name, attributes) {
+                if (name === 'script') {
+                    const src = attributes.src;
+                    if (src) {
+                        if (src.match(/https:\/\/.+\/PdpPlatformRoute\.[0-9a-f]+\.js/)) {
+                            ret.script = src;
+                            parser.end();
+                        }
+                    }
+                }
+            }
+        });
+        parser.write(await res.text());
+        parser.end();
+        ret.status = true;
+    } catch (err) {
+        ret.message = `findPlatformRouteScript() failed [${err.message}]`;
+    }
+    return ret;
+}
+
+/**
  * @brief Scraps the listing details from airbnb.com for a given id.
  *
  * @note The API V3 of airbnb.com requires that all the requests are sent
@@ -101,8 +146,8 @@ serve(async function(req) {
  * @param {string} id  airbnb.com's listing id.
  *
  * @return {Object}  results.
- * @return {boolean} results.status       true if operation was successful.
- * @return {string}  results.message      error text if operation failed.
+ * @return {boolean} results.status   true if operation was successful.
+ * @return {string}  results.message  error text if operation failed.
  */
 async function getListingDetails(id) {
     const ret = {
@@ -125,50 +170,24 @@ async function getListingDetails(id) {
             lng: 0
         }
     };
-    const url = `${abURL}/rooms/${id}`;
     const ua = new UserAgent();
     // Forges all the requests with a made-up User Agent.
     const config = { headers: { 'User-Agent': ua.toString() } };
     try {
-        const res = await fetch(url, config);
-        if (200 != res.status) {
-            throw new Error(`Unexpected response code: ${res.status}`);
-        } else if (-1 == res.headers.get('content-type').indexOf('text/html')) {
-            throw new Error(`Unexpected content type: ${res.headers.get('content-type')}`);
-        }
-        // Loads the listing HTML and finds for the PdpPlatformRoute script URL.
         let script = '';
-        // Uses the cheerio library to find the script.
-        /*
-        const page = cheerio.load(await res.text());
-        const scripts = page('script');
-        let script = '';
-        for (const k in scripts) {
-            const src = scripts[k].attribs['src'];
-            if (src) {
-                if (src.match(/https:\/\/.+\/PdpPlatformRoute\.[0-9a-f]+\.js/)) {
-                    script = src;
-                    break;
-                }
-            }
+        const res = await findPlatformRouteScript(`${abURL}/rooms/${id}`, config);
+        if (!res.status) {
+            throw new Error(res.message);
         }
-        */
-        // Uses the htmlparser2 library to find the script.
-        const parser = new htmlparser2.Parser({
-            onopentag(name, attributes) {
-                if (name === 'script') {
-                    const src = attributes.src;
-                    if (src) {
-                        if (src.match(/https:\/\/.+\/PdpPlatformRoute\.[0-9a-f]+\.js/)) {
-                            script = src;
-                            parser.end();
-                        }
-                    }
-                }
+        script = res.script;
+        if (!script.length) {
+            // Retries the search with the listing as 'plus', is the script was not found.
+            const res = await findPlatformRouteScript(`${abURL}/rooms/plus/${id}`, config);
+            if (!res.status) {
+                throw new Error(res.message);
             }
-        });
-        parser.write(await res.text());
-        parser.end();
+            script = res.script;
+        }
         let opId = '';
         if (script.length) {
             const res = await fetch(script, config);
@@ -339,7 +358,7 @@ async function getListingDetails(id) {
             }
         }
     } catch (err) {
-        ret.message = err.message;
+        ret.message = `getListingDetails() failed [${err.message}]`;
     }
     return ret;
 }
