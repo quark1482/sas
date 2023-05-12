@@ -13,9 +13,12 @@ Features
 Known bugs / ToDo's
 -------------------
 
-- [ ] For some random listings, the script only gets 50x errors. ~~Still figuring out why~~.
+- [x] ~~For some random listings, the script only gets 50x errors. Still figuring out why~~.
 <br>*It seems that under some circumnstances the 'BOOK_IT_' sections cannot be combined
 <br>with the others in a single query*.
+<br>To avoid this, another query is now being requested to separate it from the rest,
+<br>which is unfortunate, considering that for most listings this is not necessary.
+- [ ] 'Luxe' listings are also causing 50x errors as well, because of a meta-redirection.
 
 
 Installation

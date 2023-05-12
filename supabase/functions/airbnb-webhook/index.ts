@@ -133,6 +133,37 @@ async function findPlatformRouteScript(url, config) {
 }
 
 /**
+ * @brief Makes the API V3 request URL for getting the required listing details.
+ *
+ * @param {string} opId      operationId (from PdpPlatformRoute script).
+ * @param {string} lisId     airbnb.com's listing id.
+ * @param {Array}  sections  array of required listing sections.
+ *
+ * @return {string}  The API V3 request URL, ready to fetch.
+ */
+function getAPIStaysPdpSectionsRequestURL(opId, lisId, sections) {
+    const opVars = {
+        'id': btoa(`StayListing:${lisId}`),
+        'pdpSectionsRequest': {
+            'layouts': [
+                'SIDEBAR'
+            ],
+            'sectionIds': sections
+        }
+    };
+    const opExts = {
+        'persistedQuery': {
+            'version': 1,
+            'sha256Hash': opId
+        }
+    };
+    const encOpVars = encodeURIComponent(JSON.stringify(opVars));
+    const encOpExts = encodeURIComponent(JSON.stringify(opExts));
+    const query = `operationName=StaysPdpSections&locale=en&currency=USD&variables=${encOpVars}&extensions=${encOpExts}`;
+    return `${abURL}/api/v3/StaysPdpSections?${query}`;
+}
+
+/**
  * @brief Scraps the listing details from airbnb.com for a given id.
  *
  * @note The API V3 of airbnb.com requires that all the requests are sent
@@ -175,20 +206,20 @@ async function getListingDetails(id) {
     const config = { headers: { 'User-Agent': ua.toString() } };
     try {
         let script = '';
-        const res = await findPlatformRouteScript(`${abURL}/rooms/${id}`, config);
-        if (!res.status) {
-            throw new Error(res.message);
+        const r = await findPlatformRouteScript(`${abURL}/rooms/${id}`, config);
+        if (!r.status) {
+            throw new Error(r.message);
         }
-        script = res.script;
+        script = r.script;
         if (!script.length) {
             // Retries the search with the listing as 'plus', is the script was not found.
-            const res = await findPlatformRouteScript(`${abURL}/rooms/plus/${id}`, config);
-            if (!res.status) {
-                throw new Error(res.message);
+            const r = await findPlatformRouteScript(`${abURL}/rooms/plus/${id}`, config);
+            if (!r.status) {
+                throw new Error(r.message);
             }
-            script = res.script;
+            script = r.script;
         }
-        let opId = '';
+        let op = '';
         if (script.length) {
             const res = await fetch(script, config);
             if (200 != res.status) {
@@ -197,49 +228,35 @@ async function getListingDetails(id) {
                 throw new Error(`Unexpected content type: ${res.headers.get('content-type')}`);
             }
             // Loads the PdpPlatformRoute script source code and finds for the sha256Hash value.
-            opId = (await res.text()).match(/name:'StaysPdpSections',type:'query',operationId:'([0-9a-f]+)'/)?.[1];
+            op = (await res.text()).match(/name:'StaysPdpSections',type:'query',operationId:'([0-9a-f]+)'/)?.[1];
         } else {
             throw new Error('Unable to find the PdpPlatformRoute script');
         }
-        let opAPIReqURL = '';
-        if (opId.length) {
-            const opVars = {
-                'id': btoa(`StayListing:${id}`),
-                'pdpSectionsRequest': {
-                    'layouts': [
-                        'SIDEBAR'
-                    ],
-                    'sectionIds': [
-                        'TITLE_DEFAULT',
-                        'DESCRIPTION_DEFAULT',
-                        'OVERVIEW_DEFAULT',
-                        'LISTING_INFO',
-                        'HOST_PROFILE_DEFAULT',
-                        'REVIEWS_DEFAULT',
-                        'AMENITIES_DEFAULT',
-                        'HERO_DEFAULT',
-                        'LOCATION_DEFAULT',
-                        'BOOK_IT_SIDEBAR'
-                    ]
-                }
-            };
-            const opExts = {
-                'persistedQuery': {
-                    'version': 1,
-                    'sha256Hash': opId
-                }
-            };
-            const encOpVars = encodeURIComponent(JSON.stringify(opVars));
-            const encOpExts = encodeURIComponent(JSON.stringify(opExts));
-            const query = `operationName=StaysPdpSections&locale=en&currency=USD&variables=${encOpVars}&extensions=${encOpExts}`;
-            // Makes the API V3 request URL for getting the required property details.
-            opAPIReqURL = `${abURL}/api/v3/StaysPdpSections?${query}`;
-        } else {
+        if (!op.length) {
             throw new Error('Unable to find the operationId value');
         }
-        if (opAPIReqURL.length) {
-            config.headers['X-Airbnb-Api-Key'] = abAPIKey;
-            const res = await fetch(opAPIReqURL, config);
+        config.headers['X-Airbnb-Api-Key'] = abAPIKey;
+        let requestedSections = [
+            [
+                'TITLE_DEFAULT',
+                'DESCRIPTION_DEFAULT',
+                'OVERVIEW_DEFAULT',
+                'LISTING_INFO',
+                'HOST_PROFILE_DEFAULT',
+                'REVIEWS_DEFAULT',
+                'AMENITIES_DEFAULT',
+                'HERO_DEFAULT',
+                'LOCATION_DEFAULT'
+            ],
+            [
+                'BOOK_IT_SIDEBAR'
+            ]
+        ];
+        // Places an API call for each section 'group'. Plays safe by separating 'BOOK_IT_SIDEBAR' ...
+        // ... from the rest, because sometimes it causes an API internal error if it's combined.
+        for (const k in requestedSections) {
+            let apiReqURL = getAPIStaysPdpSectionsRequestURL(op, id, requestedSections[k]);
+            const res = await fetch(apiReqURL, config);
             if (200 != res.status) {
                 throw new Error(`Unexpected response code: ${res.status}`);
             } else if (-1 == res.headers.get('content-type').indexOf('application/json')) {
@@ -350,12 +367,12 @@ async function getListingDetails(id) {
                     }
                 }
             }
-            // Verifies that the 'result' object meets the minimum required set of fields.
-            if (ret.name.length && ret.price.value.length) {
-                ret.status = true;
-            } else {
-                throw new Error('Unable to find a minimum of details');
-            }
+        }
+        // Verifies that the 'result' object meets the minimum required set of fields.
+        if (ret.name.length && ret.price.value.length) {
+            ret.status = true;
+        } else {
+            throw new Error('Unable to find a minimum of details');
         }
     } catch (err) {
         ret.message = `getListingDetails() failed [${err.message}]`;
