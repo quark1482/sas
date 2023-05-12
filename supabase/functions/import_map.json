@@ -1,8 +1,8 @@
 {
   "imports": {
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.7.1",
-    "std/server": "https://deno.land/std@0.177.0/http/server.ts",
-    "cheerio": "https://esm.sh/cheerio",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js",
+    "std/server": "https://deno.land/std@0.186.0/http/server.ts",
+    "htmlparser2": "https://esm.sh/htmlparser2",
     "sanitize-html": "https://esm.sh/sanitize-html",
     "user-agents": "https://esm.sh/user-agents"
   }

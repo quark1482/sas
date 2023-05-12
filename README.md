@@ -10,6 +10,12 @@ Features
 * Shows the scraping status/result in a special column.
 
 
+Known bugs
+----------
+
+* For some random listings, the script only gets 50x errors. Still figuring out why.
+
+
 Installation
 ------------
 
@@ -84,7 +90,7 @@ Results
 -------
 
 According to the installation process, an Edge Function is created and then set up to be
-<br>invoked by a Webhook, every time a new record is created in our specifically designed table.
+<br>invoked by a Webhook, every time a new record is inserted in our specifically designed table.
 
 As explained before, the only requirement in the "insert form" is filling up the field "id",
 <br>since the others will be automatically scraped from airbnb.
@@ -143,6 +149,9 @@ Dependencies
 
 * [std/server](https://deno.land/std@0.177.0/http/server.ts)
 <br>Deno standard library's HTTP server.
+
+* [htmlparser2](https://github.com/fb55/htmlparser2)
+<br>Library for parsing/manipulating HTML.
 
 * [cheerio](https://github.com/cheeriojs/cheerio)
 <br>Library for parsing/manipulating HTML.

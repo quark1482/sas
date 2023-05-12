@@ -19,9 +19,10 @@
 import { serve }        from 'std/server';
 import { createClient } from '@supabase/supabase-js';
 
-import cheerio      from 'cheerio';
-import sanitizeHtml from 'sanitize-html';
-import UserAgent    from 'user-agents';
+//import cheerio         from 'cheerio'; // Disabled in this release. Using htmlparser2 instead.
+import * as htmlparser2 from "htmlparser2";
+import sanitizeHtml     from 'sanitize-html';
+import UserAgent        from 'user-agents';
 
 const abURL    = 'https://www.airbnb.com';
 const abAPIKey = 'd306zoyjsyarp7ifhu67rjxn52tv0t20';
@@ -136,6 +137,9 @@ async function getListingDetails(id) {
             throw new Error(`Unexpected content type: ${res.headers.get('content-type')}`);
         }
         // Loads the listing HTML and finds for the PdpPlatformRoute script URL.
+        let script = '';
+        // Uses the cheerio library to find the script.
+        /*
         const page = cheerio.load(await res.text());
         const scripts = page('script');
         let script = '';
@@ -148,6 +152,23 @@ async function getListingDetails(id) {
                 }
             }
         }
+        */
+        // Uses the htmlparser2 library to find the script.
+        const parser = new htmlparser2.Parser({
+            onopentag(name, attributes) {
+                if (name === 'script') {
+                    const src = attributes.src;
+                    if (src) {
+                        if (src.match(/https:\/\/.+\/PdpPlatformRoute\.[0-9a-f]+\.js/)) {
+                            script = src;
+                            parser.end();
+                        }
+                    }
+                }
+            }
+        });
+        parser.write(await res.text());
+        parser.end();
         let opId = '';
         if (script.length) {
             const res = await fetch(script, config);
@@ -173,6 +194,7 @@ async function getListingDetails(id) {
                         'TITLE_DEFAULT',
                         'DESCRIPTION_DEFAULT',
                         'OVERVIEW_DEFAULT',
+                        'LISTING_INFO',
                         'HOST_PROFILE_DEFAULT',
                         'REVIEWS_DEFAULT',
                         'AMENITIES_DEFAULT',
@@ -219,6 +241,14 @@ async function getListingDetails(id) {
                 if ('TITLE_DEFAULT' === sections[k].sectionId) {
                     if ('PdpTitleSection' === sections[k].section.__typename) {
                         ret.name = sections[k].section.title;
+                        if (!ret.type.length) {
+                            const save = sections[k].section.shareSave;
+                            if (save) {
+                                if (save.embedData) {
+                                    ret.type = save.embedData.propertyType;
+                                }
+                            }
+                        }
                     }
                 } else if ('DESCRIPTION_DEFAULT' === sections[k].sectionId) {
                     if ('PdpDescriptionSection' === sections[k].section.__typename) {
@@ -234,15 +264,36 @@ async function getListingDetails(id) {
                     }
                 } else if ('OVERVIEW_DEFAULT' === sections[k].sectionId) {
                     if ('PdpOverviewSection' === sections[k].section.__typename) {
-                        ret.type = sections[k].section.subtitle;
-                        const details = sections[k].section.detailItems;
-                        for (const k in details) {
-                            ret.details.push(details[k].title);
+                        if (!ret.type.length) {
+                            ret.type = sections[k].section.subtitle;
+                        }
+                        if (!ret.details.length) {
+                            const details = sections[k].section.detailItems;
+                            for (const k in details) {
+                                ret.details.push(details[k].title);
+                            }
+                        }
+                    }
+                } else if ('LISTING_INFO' === sections[k].sectionId) {
+                    if ('ListingInfoSection' === sections[k].section.__typename) {
+                        if (!ret.host.length) {
+                            ret.host = sections[k].section.profileName;
+                        }
+                        if (!ret.details.length) {
+                            const items = sections[k].section.infoItems;
+                            for (const k in items) {
+                                const details = items[k].textItems;
+                                for (const k in details) {
+                                    ret.details.push(details[k]);
+                                }
+                            }
                         }
                     }
                 } else if ('HOST_PROFILE_DEFAULT' === sections[k].sectionId) {
                     if ('HostProfileSection' === sections[k].section.__typename) {
-                        ret.host = sections[k].section.title.replace(/^hosted by/i, '').trim();
+                        if (!ret.host.length) {
+                            ret.host = sections[k].section.title.replace(/^hosted by/i, '').trim();
+                        }
                     }
                 } else if ('REVIEWS_DEFAULT' === sections[k].sectionId) {
                     if ('StayPdpReviewsSection' === sections[k].section.__typename) {
