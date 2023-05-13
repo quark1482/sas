@@ -48,16 +48,16 @@ serve(async function(req) {
         if (ret.status) {
             const u = {
                 status: ret.message,
-                name: ret.name,
-                description: ret.description,
-                type: ret.type,
-                details: ret.details,
-                host: ret.host,
-                price: ret.price,
-                rating: ret.rating,
-                amenities: ret.amenities,
-                photos: ret.photos,
-                location: ret.location
+                name: ret.details.name,
+                description: ret.details.description,
+                type: ret.details.type,
+                details: ret.details.details,
+                host: ret.details.host,
+                price: ret.details.price,
+                rating: ret.details.rating,
+                amenities: ret.details.amenities,
+                photos: ret.details.photos,
+                location: ret.details.location
             };
             // Updates the table with the scraped data.
             const { error } = await supabase.from('rooms').update(u).eq('id', id);
@@ -184,21 +184,23 @@ async function getListingDetails(id) {
     const ret = {
         status: false,
         message: '',
-        name: '',
-        description: '',
-        type: '',
-        details: [],
-        host: '',
-        price: {
-            value: '',
-            qualifier: ''
-        },
-        rating: 0,
-        amenities: [],
-        photos: [],
-        location: {
-            lat: 0,
-            lng: 0
+        details: {
+            name: '',
+            description: '',
+            type: '',
+            details: [],
+            host: '',
+            price: {
+                value: '',
+                qualifier: ''
+            },
+            rating: 0,
+            amenities: [],
+            photos: [],
+            location: {
+                lat: 0,
+                lng: 0
+            }
         }
     };
     const ua = new UserAgent();
@@ -212,8 +214,16 @@ async function getListingDetails(id) {
         }
         script = r.script;
         if (!script.length) {
-            // Retries the search with the listing as 'plus', is the script was not found.
+            // Retries the search with the listing as 'plus', if the script was not found.
             const r = await findPlatformRouteScript(`${abURL}/rooms/plus/${id}`, config);
+            if (!r.status) {
+                throw new Error(r.message);
+            }
+            script = r.script;
+        }
+        if (!script.length) {
+            // Retries the search with the listing as 'luxe', if the script was not found.
+            const r = await findPlatformRouteScript(`${abURL}/luxury/listing/${id}`, config);
             if (!r.status) {
                 throw new Error(r.message);
             }
@@ -271,111 +281,140 @@ async function getListingDetails(id) {
             } else if (staySections.metadata.errorData) {
                 throw new Error(staySections.metadata.errorData.errorMessage.errorMessage);
             }
-            const sections = staySections.sections;
-            // Fills up the 'result' object with the required values found in the JSON response 'sections'.
-            for (const k in sections) {
-                if ('TITLE_DEFAULT' === sections[k].sectionId) {
-                    if ('PdpTitleSection' === sections[k].section.__typename) {
-                        ret.name = sections[k].section.title;
-                        if (!ret.type.length) {
-                            const save = sections[k].section.shareSave;
-                            if (save) {
-                                if (save.embedData) {
-                                    ret.type = save.embedData.propertyType;
-                                }
-                            }
-                        }
-                    }
-                } else if ('DESCRIPTION_DEFAULT' === sections[k].sectionId) {
-                    if ('PdpDescriptionSection' === sections[k].section.__typename) {
-                        // Strips the unwanted HTML tags from the listing description.
-                        ret.description = sanitizeHtml(
-                            sections[k].section.htmlDescription.htmlText,
-                            {
-                                allowedTags: [
-                                    'ul', 'li', 'b', 'i', 'strong', 'p', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'
-                                ]
-                            }
-                        );
-                    }
-                } else if ('OVERVIEW_DEFAULT' === sections[k].sectionId) {
-                    if ('PdpOverviewSection' === sections[k].section.__typename) {
-                        if (!ret.type.length) {
-                            ret.type = sections[k].section.subtitle;
-                        }
-                        if (!ret.details.length) {
-                            const details = sections[k].section.detailItems;
-                            for (const k in details) {
-                                ret.details.push(details[k].title);
-                            }
-                        }
-                    }
-                } else if ('LISTING_INFO' === sections[k].sectionId) {
-                    if ('ListingInfoSection' === sections[k].section.__typename) {
-                        if (!ret.host.length) {
-                            ret.host = sections[k].section.profileName;
-                        }
-                        if (!ret.details.length) {
-                            const items = sections[k].section.infoItems;
-                            for (const k in items) {
-                                const details = items[k].textItems;
-                                for (const k in details) {
-                                    ret.details.push(details[k]);
-                                }
-                            }
-                        }
-                    }
-                } else if ('HOST_PROFILE_DEFAULT' === sections[k].sectionId) {
-                    if ('HostProfileSection' === sections[k].section.__typename) {
-                        if (!ret.host.length) {
-                            ret.host = sections[k].section.title.replace(/^hosted by/i, '').trim();
-                        }
-                    }
-                } else if ('REVIEWS_DEFAULT' === sections[k].sectionId) {
-                    if ('StayPdpReviewsSection' === sections[k].section.__typename) {
-                        ret.rating = sections[k].section.overallRating;
-                    }
-                } else if ('AMENITIES_DEFAULT' === sections[k].sectionId) {
-                    if ('AmenitiesSection' === sections[k].section.__typename) {
-                        const groups = sections[k].section.seeAllAmenitiesGroups;
-                        for (const k in groups) {
-                            const amenities = groups[k].amenities;
-                            for (const k in amenities) {
-                                if (amenities[k].available) {
-                                    ret.amenities.push(amenities[k].title);
-                                }
-                            }
-                        }
-                    }
-                } else if ('HERO_DEFAULT' === sections[k].sectionId) {
-                    if ('PdpHeroSection' === sections[k].section.__typename) {
-                        const photos = sections[k].section.previewImages;
-                        for (const k in photos) {
-                            ret.photos.push(photos[k].baseUrl);
-                        }
-                    }
-                } else if ('LOCATION_DEFAULT' === sections[k].sectionId) {
-                    if ('LocationSection' === sections[k].section.__typename) {
-                        ret.location.lat = sections[k].section.lat;
-                        ret.location.lng = sections[k].section.lng;
-                    }
-                } else if ('BOOK_IT_SIDEBAR' === sections[k].sectionId) {
-                    if ('BookItSection' === sections[k].section.__typename) {
-                        const displayPrice = sections[k].section.structuredDisplayPrice.primaryLine;
-                        ret.price.value = displayPrice.price;
-                        ret.price.qualifier = displayPrice.qualifier;
-                    }
-                }
+            const r = parseSections(ret.details, staySections.sections);
+            if (!r.status) {
+                throw new Error(r.message);
             }
+            ret.details = r.details;
         }
         // Verifies that the 'result' object meets the minimum required set of fields.
-        if (ret.name.length && ret.price.value.length) {
+        if (ret.details.name.length && ret.details.price.value.length) {
             ret.status = true;
         } else {
             throw new Error('Unable to find a minimum of details');
         }
     } catch (err) {
         ret.message = `getListingDetails() failed [${err.message}]`;
+    }
+    return ret;
+}
+
+/**
+* @brief Fills up an object with the required values found in the JSON response 'sections'
+*        of an API V3 StaysPdpSections request.
+*
+* @param {Object} curDetails  object containing the original details (to start from).
+* @param {Array}  sections    array of section objects (from the StaysPdpSections request).
+*
+* @return {Object}  results.
+* @return {boolean} results.status   true if operation was successful.
+* @return {string}  results.message  error text if operation failed.
+* @return {Object}  results.details  object containing additional parsed details (if any).
+*/
+function parseSections(curDetails, sections) {
+    const ret = {
+        status: false,
+        message: '',
+        details: curDetails
+    };
+    try {
+        for (const k in sections) {
+            if ('TITLE_DEFAULT' === sections[k].sectionId) {
+                if ('PdpTitleSection' === sections[k].section.__typename) {
+                    ret.details.name = sections[k].section.title;
+                    if (!ret.details.type.length) {
+                        const save = sections[k].section.shareSave;
+                        if (save) {
+                            if (save.embedData) {
+                                ret.details.type = save.embedData.propertyType;
+                            }
+                        }
+                    }
+                }
+            } else if ('DESCRIPTION_DEFAULT' === sections[k].sectionId) {
+                if ('PdpDescriptionSection' === sections[k].section.__typename) {
+                    // Strips the unwanted HTML tags from the listing description.
+                    ret.details.description = sanitizeHtml(
+                        sections[k].section.htmlDescription.htmlText,
+                        {
+                            allowedTags: [
+                                'ul', 'li', 'b', 'i', 'strong', 'p', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'
+                            ]
+                        }
+                    );
+                }
+            } else if ('OVERVIEW_DEFAULT' === sections[k].sectionId) {
+                if ('PdpOverviewSection' === sections[k].section.__typename) {
+                    if (!ret.details.type.length) {
+                        ret.details.type = sections[k].section.subtitle;
+                    }
+                    if (!ret.details.details.length) {
+                        const details = sections[k].section.detailItems;
+                        for (const k in details) {
+                            ret.details.details.push(details[k].title);
+                        }
+                    }
+                }
+            } else if ('LISTING_INFO' === sections[k].sectionId) {
+                if ('ListingInfoSection' === sections[k].section.__typename) {
+                    if (!ret.details.host.length) {
+                        ret.details.host = sections[k].section.profileName;
+                    }
+                    if (!ret.details.details.length) {
+                        const items = sections[k].section.infoItems;
+                        for (const k in items) {
+                            const details = items[k].textItems;
+                            for (const k in details) {
+                                ret.details.details.push(details[k]);
+                            }
+                        }
+                    }
+                }
+            } else if ('HOST_PROFILE_DEFAULT' === sections[k].sectionId) {
+                if ('HostProfileSection' === sections[k].section.__typename) {
+                    if (!ret.details.host.length) {
+                        ret.details.host = sections[k].section.title.replace(/^hosted by/i, '').trim();
+                    }
+                }
+            } else if ('REVIEWS_DEFAULT' === sections[k].sectionId) {
+                if ('StayPdpReviewsSection' === sections[k].section.__typename) {
+                    ret.details.rating = sections[k].section.overallRating;
+                }
+            } else if ('AMENITIES_DEFAULT' === sections[k].sectionId) {
+                if ('AmenitiesSection' === sections[k].section.__typename) {
+                    const groups = sections[k].section.seeAllAmenitiesGroups;
+                    for (const k in groups) {
+                        const amenities = groups[k].amenities;
+                        for (const k in amenities) {
+                            if (amenities[k].available) {
+                                ret.details.amenities.push(amenities[k].title);
+                            }
+                        }
+                    }
+                }
+            } else if ('HERO_DEFAULT' === sections[k].sectionId) {
+                if ('PdpHeroSection' === sections[k].section.__typename) {
+                    const photos = sections[k].section.previewImages;
+                    for (const k in photos) {
+                        ret.details.photos.push(photos[k].baseUrl);
+                    }
+                }
+            } else if ('LOCATION_DEFAULT' === sections[k].sectionId) {
+                if ('LocationSection' === sections[k].section.__typename) {
+                    ret.details.location.lat = sections[k].section.lat;
+                    ret.details.location.lng = sections[k].section.lng;
+                }
+            } else if ('BOOK_IT_SIDEBAR' === sections[k].sectionId) {
+                if ('BookItSection' === sections[k].section.__typename) {
+                    const displayPrice = sections[k].section.structuredDisplayPrice.primaryLine;
+                    ret.details.price.value = displayPrice.price;
+                    ret.details.price.qualifier = displayPrice.qualifier;
+                }
+            }
+        }
+        ret.status = true;
+    } catch (err) {
+        ret.message = `parseSections() failed [${err.message}]`;
     }
     return ret;
 }

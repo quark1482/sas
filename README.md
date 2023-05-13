@@ -18,7 +18,9 @@ Known bugs / ToDo's
 <br>with the others in a single query*.
 <br>To avoid this, another query is now being requested to separate it from the rest,
 <br>which is unfortunate, considering that for most listings this is not necessary.
-- [ ] 'Luxe' listings are also causing 50x errors as well, because of a meta-redirection.
+- [ ] ~~'Luxe' listings are also causing 50x errors as well, because of a meta-redirection~~.
+<br>It seems that this kind of listing either lacks some fields or has a different internal
+<br>layout (in JSON response terms) for such information.
 
 
 Installation
