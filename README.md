@@ -18,9 +18,13 @@ Known bugs / ToDo's
 <br>with the others in a single query*.
 <br>To avoid this, another query is now being requested to separate it from the rest,
 <br>which is unfortunate, considering that for most listings this is not necessary.
-- [ ] ~~'Luxe' listings are also causing 50x errors as well, because of a meta-redirection~~.
+- [x] ~~'Luxe' listings are also causing 50x errors as well, because of a meta-redirection~~.
 <br>It seems that this kind of listing either lacks some fields or has a different internal
 <br>layout (in JSON response terms) for such information.
+<br>The script is now requesting the sections DESCRIPTION_LUXE and OVERVIEW_LUXE to solve
+<br>the issue, but (apparently) there are no disclosed host details to scrap (that I know).
+
+[Write me](mailto:quark1482@protonmail.com?subject=[GitHub]%20SAS) if you find something else.
 
 
 Installation
@@ -90,7 +94,7 @@ Installation
     - Wait a few seconds and click on Refresh
     - Check the collected data for the new record.
     <br>_The "status" value will be EMPTY unless something fails_<br><br>
-    ><sup>"room id" is the numerical value following ` https://www.airbnb.com/rooms/ ` for each listing</sup>
+    ><sup>"room id" is the numerical value following ` /rooms/ `, ` /rooms/plus/ ` or ` /luxury/listing/ ` for each listing URL.</sup>
 
 
 Results
@@ -160,8 +164,8 @@ Dependencies
 * [htmlparser2](https://github.com/fb55/htmlparser2)
 <br>Library for parsing/manipulating HTML.
 
-* [cheerio](https://github.com/cheeriojs/cheerio)
-<br>Library for parsing/manipulating HTML.
+* ~~[cheerio](https://github.com/cheeriojs/cheerio)~~
+~~<br>Library for parsing/manipulating HTML.~~
 
 * [sanitize-html](https://github.com/apostrophecms/sanitize-html)
 <br>HTML sanitizer.

@@ -26,6 +26,8 @@ import UserAgent        from 'user-agents';
 const abURL    = 'https://www.airbnb.com';
 const abAPIKey = 'd306zoyjsyarp7ifhu67rjxn52tv0t20';
 
+const allowedHTMLTags = ['ul', 'li', 'b', 'i', 'strong', 'p', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+
 serve(async function(req) {
     const json = await req.json();
     const type = json.type;
@@ -40,7 +42,7 @@ serve(async function(req) {
             Deno.env.get('SUPABASE_URL'),
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
         );
-        // Scrapes the details of the listing whose id belongs to the inserted record.
+        // Scrapes the fields of the listing whose id belongs to the inserted record.
         // This clearly requires an existing webhook for the event 'Insert' which ...
         // ... passes the required record id, but it may be extended for 'Update' ...
         // ... allowing a follow-up scrape of the same listing in a future.
@@ -48,16 +50,16 @@ serve(async function(req) {
         if (ret.status) {
             const u = {
                 status: ret.message,
-                name: ret.details.name,
-                description: ret.details.description,
-                type: ret.details.type,
-                details: ret.details.details,
-                host: ret.details.host,
-                price: ret.details.price,
-                rating: ret.details.rating,
-                amenities: ret.details.amenities,
-                photos: ret.details.photos,
-                location: ret.details.location
+                name: ret.listing.name,
+                description: ret.listing.description,
+                type: ret.listing.type,
+                details: ret.listing.details,
+                host: ret.listing.host,
+                price: ret.listing.price,
+                rating: ret.listing.rating,
+                amenities: ret.listing.amenities,
+                photos: ret.listing.photos,
+                location: ret.listing.location
             };
             // Updates the table with the scraped data.
             const { error } = await supabase.from('rooms').update(u).eq('id', id);
@@ -133,7 +135,7 @@ async function findPlatformRouteScript(url, config) {
 }
 
 /**
- * @brief Makes the API V3 request URL for getting the required listing details.
+ * @brief Makes the API V3 request URL for getting the required listing fields.
  *
  * @param {string} opId      operationId (from PdpPlatformRoute script).
  * @param {string} lisId     airbnb.com's listing id.
@@ -164,7 +166,7 @@ function getAPIStaysPdpSectionsRequestURL(opId, lisId, sections) {
 }
 
 /**
- * @brief Scraps the listing details from airbnb.com for a given id.
+ * @brief Scraps the listing fields from airbnb.com for a given id.
  *
  * @note The API V3 of airbnb.com requires that all the requests are sent
  *       using HTTP/2 connections.
@@ -184,7 +186,7 @@ async function getListingDetails(id) {
     const ret = {
         status: false,
         message: '',
-        details: {
+        listing: {
             name: '',
             description: '',
             type: '',
@@ -250,7 +252,9 @@ async function getListingDetails(id) {
             [
                 'TITLE_DEFAULT',
                 'DESCRIPTION_DEFAULT',
+                'DESCRIPTION_LUXE',
                 'OVERVIEW_DEFAULT',
+                'OVERVIEW_LUXE',
                 'LISTING_INFO',
                 'HOST_PROFILE_DEFAULT',
                 'REVIEWS_DEFAULT',
@@ -281,17 +285,17 @@ async function getListingDetails(id) {
             } else if (staySections.metadata.errorData) {
                 throw new Error(staySections.metadata.errorData.errorMessage.errorMessage);
             }
-            const r = parseSections(ret.details, staySections.sections);
+            const r = parseSections(ret.listing, staySections.sections);
             if (!r.status) {
                 throw new Error(r.message);
             }
-            ret.details = r.details;
+            ret.listing = r.listing;
         }
         // Verifies that the 'result' object meets the minimum required set of fields.
-        if (ret.details.name.length && ret.details.price.value.length) {
+        if (ret.listing.name.length && ret.listing.price.value.length) {
             ret.status = true;
         } else {
-            throw new Error('Unable to find a minimum of details');
+            throw new Error('Unable to find a minimum of listing fields');
         }
     } catch (err) {
         ret.message = `getListingDetails() failed [${err.message}]`;
@@ -303,82 +307,103 @@ async function getListingDetails(id) {
 * @brief Fills up an object with the required values found in the JSON response 'sections'
 *        of an API V3 StaysPdpSections request.
 *
-* @param {Object} curDetails  object containing the original details (to start from).
+* @param {Object} curListing  object containing the original listing values (to start from).
 * @param {Array}  sections    array of section objects (from the StaysPdpSections request).
 *
 * @return {Object}  results.
 * @return {boolean} results.status   true if operation was successful.
 * @return {string}  results.message  error text if operation failed.
-* @return {Object}  results.details  object containing additional parsed details (if any).
+* @return {Object}  results.listing  object containing additional parsed values (if any).
 */
-function parseSections(curDetails, sections) {
+function parseSections(curListing, sections) {
     const ret = {
         status: false,
         message: '',
-        details: curDetails
+        listing: curListing
     };
     try {
         for (const k in sections) {
             if ('TITLE_DEFAULT' === sections[k].sectionId) {
                 if ('PdpTitleSection' === sections[k].section.__typename) {
-                    ret.details.name = sections[k].section.title;
-                    if (!ret.details.type.length) {
+                    ret.listing.name = sections[k].section.title;
+                    if (!ret.listing.type.length) {
                         const save = sections[k].section.shareSave;
                         if (save) {
                             if (save.embedData) {
-                                ret.details.type = save.embedData.propertyType;
+                                ret.listing.type = save.embedData.propertyType;
                             }
                         }
                     }
                 }
             } else if ('DESCRIPTION_DEFAULT' === sections[k].sectionId) {
                 if ('PdpDescriptionSection' === sections[k].section.__typename) {
-                    // Strips the unwanted HTML tags from the listing description.
-                    ret.details.description = sanitizeHtml(
-                        sections[k].section.htmlDescription.htmlText,
-                        {
-                            allowedTags: [
-                                'ul', 'li', 'b', 'i', 'strong', 'p', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'
-                            ]
-                        }
-                    );
+                    if (!ret.listing.description.length) {
+                        // Strips the unwanted HTML tags from the listing description.
+                        ret.listing.description = sanitizeHtml(
+                            sections[k].section.htmlDescription.htmlText,
+                            {
+                                allowedTags: allowedHTMLTags
+                            }
+                        );
+                    }
+                }
+            } else if ('DESCRIPTION_LUXE' === sections[k].sectionId) {
+                if ('LuxeDescriptionSection' === sections[k].section.__typename) {
+                    if (!ret.listing.description.length) {
+                        // Strips the unwanted HTML tags from the listing description.
+                        ret.listing.description = sanitizeHtml(
+                            sections[k].section.htmlDescription.htmlText,
+                            {
+                                allowedTags: allowedHTMLTags
+                            }
+                        );
+                    }
                 }
             } else if ('OVERVIEW_DEFAULT' === sections[k].sectionId) {
                 if ('PdpOverviewSection' === sections[k].section.__typename) {
-                    if (!ret.details.type.length) {
-                        ret.details.type = sections[k].section.subtitle;
+                    if (!ret.listing.type.length) {
+                        ret.listing.type = sections[k].section.subtitle;
                     }
-                    if (!ret.details.details.length) {
+                    if (!ret.listing.details.length) {
                         const details = sections[k].section.detailItems;
                         for (const k in details) {
-                            ret.details.details.push(details[k].title);
+                            ret.listing.details.push(details[k].title);
+                        }
+                    }
+                }
+            } else if ('OVERVIEW_LUXE' === sections[k].sectionId) {
+                if ('PdpOverviewSection' === sections[k].section.__typename) {
+                    if (!ret.listing.details.length) {
+                        const details = sections[k].section.detailItems;
+                        for (const k in details) {
+                            ret.listing.details.push(details[k].title);
                         }
                     }
                 }
             } else if ('LISTING_INFO' === sections[k].sectionId) {
                 if ('ListingInfoSection' === sections[k].section.__typename) {
-                    if (!ret.details.host.length) {
-                        ret.details.host = sections[k].section.profileName;
+                    if (!ret.listing.host.length) {
+                        ret.listing.host = sections[k].section.profileName;
                     }
-                    if (!ret.details.details.length) {
+                    if (!ret.listing.details.length) {
                         const items = sections[k].section.infoItems;
                         for (const k in items) {
                             const details = items[k].textItems;
                             for (const k in details) {
-                                ret.details.details.push(details[k]);
+                                ret.listing.details.push(details[k]);
                             }
                         }
                     }
                 }
             } else if ('HOST_PROFILE_DEFAULT' === sections[k].sectionId) {
                 if ('HostProfileSection' === sections[k].section.__typename) {
-                    if (!ret.details.host.length) {
-                        ret.details.host = sections[k].section.title.replace(/^hosted by/i, '').trim();
+                    if (!ret.listing.host.length) {
+                        ret.listing.host = sections[k].section.title.replace(/^hosted by/i, '').trim();
                     }
                 }
             } else if ('REVIEWS_DEFAULT' === sections[k].sectionId) {
                 if ('StayPdpReviewsSection' === sections[k].section.__typename) {
-                    ret.details.rating = sections[k].section.overallRating;
+                    ret.listing.rating = sections[k].section.overallRating;
                 }
             } else if ('AMENITIES_DEFAULT' === sections[k].sectionId) {
                 if ('AmenitiesSection' === sections[k].section.__typename) {
@@ -387,7 +412,7 @@ function parseSections(curDetails, sections) {
                         const amenities = groups[k].amenities;
                         for (const k in amenities) {
                             if (amenities[k].available) {
-                                ret.details.amenities.push(amenities[k].title);
+                                ret.listing.amenities.push(amenities[k].title);
                             }
                         }
                     }
@@ -396,19 +421,19 @@ function parseSections(curDetails, sections) {
                 if ('PdpHeroSection' === sections[k].section.__typename) {
                     const photos = sections[k].section.previewImages;
                     for (const k in photos) {
-                        ret.details.photos.push(photos[k].baseUrl);
+                        ret.listing.photos.push(photos[k].baseUrl);
                     }
                 }
             } else if ('LOCATION_DEFAULT' === sections[k].sectionId) {
                 if ('LocationSection' === sections[k].section.__typename) {
-                    ret.details.location.lat = sections[k].section.lat;
-                    ret.details.location.lng = sections[k].section.lng;
+                    ret.listing.location.lat = sections[k].section.lat;
+                    ret.listing.location.lng = sections[k].section.lng;
                 }
             } else if ('BOOK_IT_SIDEBAR' === sections[k].sectionId) {
                 if ('BookItSection' === sections[k].section.__typename) {
                     const displayPrice = sections[k].section.structuredDisplayPrice.primaryLine;
-                    ret.details.price.value = displayPrice.price;
-                    ret.details.price.qualifier = displayPrice.qualifier;
+                    ret.listing.price.value = displayPrice.price;
+                    ret.listing.price.qualifier = displayPrice.qualifier;
                 }
             }
         }
